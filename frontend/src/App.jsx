@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import Profile from "./Profile.jsx";
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000/api";
 
@@ -84,6 +85,20 @@ function App() {
   }
 
   useEffect(() => { loadEvents(); }, []);
+  useEffect(() => {
+    const token = localStorage.getItem("evently_token");
+    if (!token) return;
+    let active = true;
+    request("/auth/me", { headers: { Authorization: `Bearer ${token}` } })
+      .then(({ user: account }) => {
+        if (active) {
+          const profile = { id: account.id || account._id, name: account.name, email: account.email, role: account.role };
+          localStorage.setItem("evently_user", JSON.stringify(profile));
+          setUser(profile);
+        }
+      }).catch(() => {});
+    return () => { active = false; };
+  }, []);
   useEffect(() => { loadMyEvents(); }, [user]);
   useEffect(() => { loadRegistrations(); }, [user]);
 
@@ -214,7 +229,8 @@ function App() {
         <a className="brand" href="#top"><span className="brand-mark">✦</span> evently</a>
         <div className="nav-links"><a href="#discover">Discover</a><a href="#organize">Organize</a>{user?.role === "admin" && <a href="#admin-review">Admin review</a>}<a href="#about">About</a></div>
         <div className="nav-actions">
-          {user ? <button className="ghost-button" onClick={() => { localStorage.clear(); setUser(null); }}>Log out</button> : <a className="outline-button" href="#auth">Sign in</a>}
+          {user && <a className="outline-button profile-nav" href="#profile">My profile</a>}
+          {user ? <button className="ghost-button" onClick={() => { localStorage.removeItem("evently_token"); localStorage.removeItem("evently_user"); setUser(null); }}>Log out</button> : <a className="outline-button" href="#auth">Sign in</a>}
           <a className="primary-button" href="#organize">Host an event <span>↗</span></a>
         </div>
       </nav>
@@ -229,6 +245,11 @@ function App() {
         </div>
         <div className="hero-art"><div className="art-card card-back" /><div className="art-card card-main"><div className="art-label">NEXT EVENT</div><div className="art-date">18<span>MAR</span></div><div className="art-title">Creative<br />Mornings</div><div className="art-meta">Bengaluru · 09:00 AM</div></div><div className="floating-note">✦ <span>Good things<br />are waiting.</span></div></div>
       </section>
+
+      {user && <Profile key={user.id || user._id} user={user} request={request} onSaved={(profile) => {
+        localStorage.setItem("evently_user", JSON.stringify(profile));
+        setUser(profile);
+      }} />}
 
       <section className="discover shell" id="discover">
         <div className="section-heading"><div><div className="eyebrow">Find your people</div><h2>Events worth showing up for.</h2></div><div className="search-wrap"><span>⌕</span><input value={search} onChange={(event) => setSearch(event.target.value)} onKeyDown={(event) => event.key === "Enter" && loadEvents()} placeholder="Search events" /></div></div>
