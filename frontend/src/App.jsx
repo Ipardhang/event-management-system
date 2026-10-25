@@ -128,6 +128,30 @@ function App() {
     }
   }
 
+  function handleImageUpload(event) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith("image/")) return setNotice("Please choose an image file.");
+    if (file.size > 8 * 1024 * 1024) return setNotice("Please choose an image smaller than 8 MB.");
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      const image = new Image();
+      image.onload = () => {
+        const maxSize = 1280;
+        const scale = Math.min(1, maxSize / Math.max(image.width, image.height));
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.round(image.width * scale);
+        canvas.height = Math.round(image.height * scale);
+        canvas.getContext("2d").drawImage(image, 0, 0, canvas.width, canvas.height);
+        setEventForm((current) => ({ ...current, image: canvas.toDataURL("image/jpeg", 0.78) }));
+        setNotice("Photo added. Submit the event when you are ready.");
+      };
+      image.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  }
+
   async function moderateEvent(id, status) {
     try {
       await request(`/events/${id}/status`, {
@@ -153,7 +177,7 @@ function App() {
     <main>
       <nav className="nav shell">
         <a className="brand" href="#top"><span className="brand-mark">✦</span> evently</a>
-        <div className="nav-links"><a href="#discover">Discover</a><a href="#organize">Organize</a><a href="#about">About</a></div>
+        <div className="nav-links"><a href="#discover">Discover</a><a href="#organize">Organize</a>{user?.role === "admin" && <a href="#admin-review">Admin review</a>}<a href="#about">About</a></div>
         <div className="nav-actions">
           {user ? <button className="ghost-button" onClick={() => { localStorage.clear(); setUser(null); }}>Log out</button> : <a className="outline-button" href="#auth">Sign in</a>}
           <a className="primary-button" href="#organize">Host an event <span>↗</span></a>
@@ -181,10 +205,10 @@ function App() {
 
       <section className="organize shell" id="organize">
         <div className="organize-intro"><div className="eyebrow">For the ones who bring us together</div><h2>Have an idea?<br /><em>Bring it to life.</em></h2><p>Create an event people will talk about long after it ends.</p></div>
-        {isOrganizer ? <form className="event-form" onSubmit={createEvent}><h3>Create a new event</h3><p className="form-help">Your submission will be visible in your organizer dashboard while it waits for approval.</p><input name="title" value={eventForm.title} onChange={updateForm(setEventForm)} placeholder="Event title" required /><textarea name="description" value={eventForm.description} onChange={updateForm(setEventForm)} placeholder="Tell people what to expect" required /><div className="form-row"><input name="category" value={eventForm.category} onChange={updateForm(setEventForm)} placeholder="Category" required /><input name="location" value={eventForm.location} onChange={updateForm(setEventForm)} placeholder="Location" required /></div><div className="form-row"><input type="datetime-local" name="date" value={eventForm.date} onChange={updateForm(setEventForm)} required /><input type="number" name="capacity" min="1" value={eventForm.capacity} onChange={updateForm(setEventForm)} placeholder="Capacity" required /></div><input type="url" name="image" value={eventForm.image} onChange={updateForm(setEventForm)} placeholder="Event photo URL (https://...)" /><p className="form-help">Add a public image URL to make your event card stand out.</p><button className="primary-button" type="submit">Submit for approval ↗</button></form> : <div className="organize-card"><span className="big-star">✦</span><h3>Every great event<br />starts with an idea.</h3><p>Sign up as an organizer to share yours with the community.</p><a className="primary-button" href="#auth">Become an organizer ↗</a></div>}
+        {isOrganizer ? <form className="event-form" onSubmit={createEvent}><h3>Create a new event</h3><p className="form-help">Your submission will be visible in your organizer dashboard while it waits for approval.</p><input name="title" value={eventForm.title} onChange={updateForm(setEventForm)} placeholder="Event title" required /><textarea name="description" value={eventForm.description} onChange={updateForm(setEventForm)} placeholder="Tell people what to expect" required /><div className="form-row"><input name="category" value={eventForm.category} onChange={updateForm(setEventForm)} placeholder="Category" required /><input name="location" value={eventForm.location} onChange={updateForm(setEventForm)} placeholder="Location" required /></div><div className="form-row"><input type="datetime-local" name="date" value={eventForm.date} onChange={updateForm(setEventForm)} required /><input type="number" name="capacity" min="1" value={eventForm.capacity} onChange={updateForm(setEventForm)} placeholder="Capacity" required /></div><label className="upload-field"><span className="upload-icon">↑</span><span><strong>Upload event photo</strong><small>JPG, PNG, or WEBP · max 8 MB</small></span><input type="file" accept="image/png,image/jpeg,image/webp" onChange={handleImageUpload} /></label>{eventForm.image && <div className="photo-preview"><img src={eventForm.image} alt="Event preview" /><button type="button" onClick={() => setEventForm((current) => ({ ...current, image: "" }))}>Remove photo</button></div>}<div className="photo-divider"><span>or paste an image URL</span></div><input type="url" name="image" value={eventForm.image.startsWith("data:") ? "" : eventForm.image} onChange={updateForm(setEventForm)} placeholder="Event photo URL (https://...)" /><p className="form-help">A photo makes your event easier to discover.</p><button className="primary-button" type="submit">Submit for approval ↗</button></form> : <div className="organize-card"><span className="big-star">✦</span><h3>Every great event<br />starts with an idea.</h3><p>Sign up as an organizer to share yours with the community.</p><a className="primary-button" href="#auth">Become an organizer ↗</a></div>}
       </section>
 
-      {isOrganizer && <section className="my-events shell"><div className="section-heading"><div><div className="eyebrow">{user.role === "admin" ? "Control center" : "Your organizer space"}</div><h2>{user.role === "admin" ? "Review events." : "Your submissions."}</h2></div><span className="muted">{myEvents.length} event{myEvents.length === 1 ? "" : "s"}</span></div>{myEvents.length === 0 ? <div className="submission-empty">{user.role === "admin" ? "No event submissions need review." : "Your submitted events will appear here with their approval status."}</div> : <div className="submission-grid">{myEvents.map((event) => <article className="submission-card" key={event._id}><div><span className={`status-pill ${event.status}`}>{event.status}</span><h3>{event.title}</h3><p>{formatDate(event.date)} · {event.location}</p>{user.role === "admin" && <p className="submission-organizer">Organizer: {event.organizer?.name || "Unknown"}</p>}</div>{user.role === "admin" && event.status === "pending" ? <div className="moderation-actions"><button className="approve-button" onClick={() => moderateEvent(event._id, "approved")}>Approve</button><button className="reject-button" onClick={() => moderateEvent(event._id, "rejected")}>Reject</button></div> : <span className="submission-arrow">↗</span>}</article>)}</div>}</section>}
+      {isOrganizer && <section className="my-events shell" id={user.role === "admin" ? "admin-review" : undefined}><div className="section-heading"><div><div className="eyebrow">{user.role === "admin" ? "Control center" : "Your organizer space"}</div><h2>{user.role === "admin" ? "Review events." : "Your submissions."}</h2></div><span className="muted">{myEvents.length} event{myEvents.length === 1 ? "" : "s"}</span></div>{myEvents.length === 0 ? <div className="submission-empty">{user.role === "admin" ? "No event submissions need review." : "Your submitted events will appear here with their approval status."}</div> : <div className="submission-grid">{myEvents.map((event) => <article className="submission-card" key={event._id}><div><span className={`status-pill ${event.status}`}>{event.status}</span><h3>{event.title}</h3><p>{formatDate(event.date)} · {event.location}</p>{user.role === "admin" && <p className="submission-organizer">Organizer: {event.organizer?.name || "Unknown"}</p>}</div>{user.role === "admin" && event.status === "pending" ? <div className="moderation-actions"><button className="approve-button" onClick={() => moderateEvent(event._id, "approved")}>Approve</button><button className="reject-button" onClick={() => moderateEvent(event._id, "rejected")}>Reject</button></div> : <span className="submission-arrow">↗</span>}</article>)}</div>}</section>}
 
       <section className="auth shell" id="auth"><div className="auth-copy"><div className="eyebrow">Your event journey</div><h2>Be part of<br /><em>something good.</em></h2><p>Sign in to reserve your spot, or create an organizer account to bring your own event to life.</p></div><form className="auth-form" onSubmit={handleAuth}><div className="tabs"><button type="button" className={authMode === "login" ? "active" : ""} onClick={() => setAuthMode("login")}>Sign in</button><button type="button" className={authMode === "register" ? "active" : ""} onClick={() => setAuthMode("register")}>Create account</button></div>{authMode === "register" && <input name="name" value={authForm.name} onChange={updateForm(setAuthForm)} placeholder="Full name" required />}<input type="email" name="email" value={authForm.email} onChange={updateForm(setAuthForm)} placeholder="Email address" required /><input type="password" name="password" value={authForm.password} onChange={updateForm(setAuthForm)} placeholder="Password (6+ characters)" required />{authMode === "register" && <select name="role" value={authForm.role} onChange={updateForm(setAuthForm)}><option value="attendee">I want to attend events</option><option value="organizer">I want to organize events</option></select>}<button className="primary-button" type="submit" disabled={authBusy}>{authBusy ? "Please wait…" : authMode === "login" ? "Sign in" : "Create account"} <span>→</span></button></form></section>
 
