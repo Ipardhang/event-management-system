@@ -23,8 +23,12 @@ function formatMoney(value) {
 function App() {
   const [events, setEvents] = useState([]);
   const [search, setSearch] = useState("");
+  const [categoryFilter, setCategoryFilter] = useState("all");
+  const [dateFilter, setDateFilter] = useState("all");
+  const [placeFilter, setPlaceFilter] = useState("all");
   const [loading, setLoading] = useState(true);
   const [notice, setNotice] = useState("");
+  const [toast, setToast] = useState(null);
   const [myEvents, setMyEvents] = useState([]);
   const [registrations, setRegistrations] = useState([]);
   const [selectedEvent, setSelectedEvent] = useState(null);
@@ -36,9 +40,31 @@ function App() {
   const [user, setUser] = useState(() => JSON.parse(localStorage.getItem("evently_user") || "null"));
   const visibleEvents = useMemo(() => {
     const term = search.trim().toLowerCase();
-    if (!term) return events;
-    return events.filter((event) => `${event.title} ${event.category} ${event.location}`.toLowerCase().includes(term));
-  }, [events, search]);
+    const now = new Date();
+    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const endOfToday = new Date(startOfToday);
+    endOfToday.setDate(endOfToday.getDate() + 1);
+    const endOfWeek = new Date(startOfToday);
+    endOfWeek.setDate(endOfWeek.getDate() + (startOfToday.getDay() === 0 ? 1 : 8 - startOfToday.getDay()));
+    const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+    const endOfNext30Days = new Date(now);
+    endOfNext30Days.setDate(endOfNext30Days.getDate() + 30);
+    return events.filter((event) => {
+      const eventDate = new Date(event.date);
+      const matchesSearch = !term || `${event.title} ${event.category} ${event.location}`.toLowerCase().includes(term);
+      const matchesCategory = categoryFilter === "all" || event.category === categoryFilter;
+      const matchesPlace = placeFilter === "all" || event.location === placeFilter;
+      const matchesDate = dateFilter === "all"
+        || (dateFilter === "today" && eventDate >= startOfToday && eventDate < endOfToday)
+        || (dateFilter === "week" && eventDate >= startOfToday && eventDate < endOfWeek)
+        || (dateFilter === "month" && eventDate >= startOfToday && eventDate < endOfMonth)
+        || (dateFilter === "next30" && eventDate >= now && eventDate <= endOfNext30Days);
+      return matchesSearch && matchesCategory && matchesPlace && matchesDate;
+    });
+  }, [events, search, categoryFilter, dateFilter, placeFilter]);
+
+  const categories = useMemo(() => [...new Set(events.map((event) => event.category).filter(Boolean))].sort(), [events]);
+  const places = useMemo(() => [...new Set(events.map((event) => event.location).filter(Boolean))].sort(), [events]);
 
   const upcomingEvent = useMemo(() => events
     .filter((event) => new Date(event.date).getTime() > Date.now())
@@ -113,6 +139,21 @@ function App() {
   }, []);
   useEffect(() => { loadMyEvents(); }, [user]);
   useEffect(() => { loadRegistrations(); }, [user]);
+  useEffect(() => {
+    if (!toast) return undefined;
+    const timer = window.setTimeout(() => setToast(null), 5000);
+    return () => window.clearTimeout(timer);
+  }, [toast]);
+
+  function showToast(message, type = "success") {
+    setToast({ message, type });
+  }
+
+  function resetFilters() {
+    setCategoryFilter("all");
+    setDateFilter("all");
+    setPlaceFilter("all");
+  }
 
   async function handleAuth(event) {
     event.preventDefault();
@@ -134,20 +175,25 @@ function App() {
   }
 
   async function registerForEvent(id, quantity = ticketQuantity) {
-    if (!user) return setNotice("Please log in before registering for an event.");
+    if (!user) {
+      showToast("Please sign in before booking a ticket.", "error");
+      return;
+    }
     try {
       const data = await request(`/registrations/events/${id}`, {
         method: "POST",
         headers: { Authorization: `Bearer ${localStorage.getItem("evently_token")}` },
         body: JSON.stringify({ quantity })
       });
-      setNotice(`${quantity} ticket${quantity === 1 ? "" : "s"} confirmed. Total: ${formatMoney(data.pricing?.totalAmount ?? data.registration.totalAmount)}.`);
+      const total = data.pricing?.totalAmount ?? data.registration.totalAmount;
+      showToast(`Booking confirmed! ${quantity} ticket${quantity === 1 ? "" : "s"} · Total ${formatMoney(total)}.`, "success");
       setSelectedEvent(null);
       setTicketQuantity(1);
       loadEvents();
       loadRegistrations();
+      window.location.hash = "#bookings";
     } catch (error) {
-      setNotice(error.message);
+      showToast(error.message, "error");
     }
   }
 
@@ -210,10 +256,13 @@ function App() {
         <div className="nav-links"><a href="#discover">Discover</a><a href="#organize">Organize</a>{user?.role === "admin" && <a href="#admin-review">Admin review</a>}<a href="#about">About</a></div>
         <div className="nav-actions">
           {user && <a className="outline-button profile-nav" href="#profile">My profile</a>}
+          {user?.role === "attendee" && <a className="outline-button bookings-nav" href="#bookings">My bookings</a>}
           {user ? <button className="ghost-button" onClick={() => { localStorage.removeItem("evently_token"); localStorage.removeItem("evently_user"); setUser(null); }}>Log out</button> : <a className="outline-button" href="#auth">Sign in</a>}
           <a className="primary-button" href="#add-event">Add an event <span>↗</span></a>
         </div>
       </nav>
+
+      {toast && <div className={`toast-notification ${toast.type}`} role="status"><span>{toast.type === "success" ? "✓" : "!"}</span><p>{toast.message}</p><button type="button" onClick={() => setToast(null)} aria-label="Close notification">×</button></div>}
 
       {view === "profile" && user ? <Profile key={user.id || user._id} user={user} request={request} onSaved={(profile) => {
         localStorage.setItem("evently_user", JSON.stringify(profile));
@@ -232,11 +281,12 @@ function App() {
 
       <section className="discover shell" id="discover">
         <div className="section-heading"><div><div className="eyebrow">Find your people</div><h2>Events worth showing up for.</h2></div><div className="search-wrap"><span>⌕</span><input value={search} onChange={(event) => setSearch(event.target.value)} onKeyDown={(event) => event.key === "Enter" && loadEvents()} placeholder="Search events" /></div></div>
+        <div className="filter-bar" aria-label="Filter events"><label><span>Type</span><select value={categoryFilter} onChange={(event) => setCategoryFilter(event.target.value)}><option value="all">All types</option>{categories.map((category) => <option key={category} value={category}>{category}</option>)}</select></label><label><span>Date</span><select value={dateFilter} onChange={(event) => setDateFilter(event.target.value)}><option value="all">Any date</option><option value="today">Today</option><option value="week">This week</option><option value="month">This month</option><option value="next30">Next 30 days</option></select></label><label><span>Place</span><select value={placeFilter} onChange={(event) => setPlaceFilter(event.target.value)}><option value="all">All places</option>{places.map((place) => <option key={place} value={place}>{place}</option>)}</select></label><button className="ghost-button filter-reset" type="button" onClick={resetFilters}>Reset filters</button><span className="filter-count">{visibleEvents.length} event{visibleEvents.length === 1 ? "" : "s"}</span></div>
         {notice && <div className="notice">{notice}</div>}
         {loading ? <p className="muted">Loading events…</p> : visibleEvents.length === 0 ? <div className="empty"><span>✦</span><h3>Your next event starts here.</h3><p>No approved events yet. Organizers can submit an event below; it will appear here after admin approval.</p><a className="text-link" href="#add-event">Create an event ↗</a></div> : <div className="event-grid">{visibleEvents.map((event) => <article className="event-card clickable" key={event._id} onClick={() => openEvent(event)}><div className="event-image" style={event.image ? { backgroundImage: `linear-gradient(180deg, #102a4310, #102a43aa), url(${event.image})` } : undefined}><span>{event.category}</span><b>{new Date(event.date).getDate()}</b></div><div className="event-content"><div className="event-date">{formatDate(event.date)}</div><h3>{event.title}</h3><p>{event.location}</p><div className="event-footer"><span>{formatPrice(event.ticketPrice)}</span><button onClick={(clickEvent) => { clickEvent.stopPropagation(); openEvent(event); }}>Choose tickets →</button></div></div></article>)}</div>}
       </section>
 
-      {user?.role === "attendee" && <section className="tickets shell"><div className="section-heading"><div><div className="eyebrow">Your event pass</div><h2>My bookings.</h2></div><span className="muted">{registrations.length} booking{registrations.length === 1 ? "" : "s"}</span></div>{registrations.length === 0 ? <div className="submission-empty">Your confirmed event tickets will appear here after you reserve a spot.</div> : <div className="ticket-grid">{registrations.map((registration) => { const bookedQuantity = registration.quantity || 1; const savedTotal = registration.totalAmount ?? ((Number(registration.event?.ticketPrice) || 0) * bookedQuantity * 1.18); return <article className="ticket-card" key={registration._id}><div className="ticket-accent" /><div className="ticket-main"><span className="status-pill confirmed">{registration.status}</span><h3>{registration.event?.title || "Event"}</h3><p>{registration.event ? `${formatDate(registration.event.date)} · ${registration.event.location}` : "Event details unavailable"}</p><small>{bookedQuantity} ticket{bookedQuantity === 1 ? "" : "s"} · {formatMoney(savedTotal)}</small></div><div className="ticket-code"><span>TICKET NUMBER</span><strong>{registration.ticketNumber}</strong></div></article>; })}</div>}</section>}
+      {user?.role === "attendee" && <section className="tickets shell" id="bookings"><div className="section-heading"><div><div className="eyebrow">Your event pass</div><h2>My bookings.</h2></div><span className="muted">{registrations.length} booking{registrations.length === 1 ? "" : "s"}</span></div>{registrations.length === 0 ? <div className="submission-empty">Your confirmed event tickets will appear here after you reserve a spot.</div> : <div className="ticket-grid">{registrations.map((registration) => { const bookedQuantity = registration.quantity || 1; const savedTotal = registration.totalAmount ?? ((Number(registration.event?.ticketPrice) || 0) * bookedQuantity * 1.18); return <article className="ticket-card" key={registration._id}><div className="ticket-accent" /><div className="ticket-main"><span className="status-pill confirmed">{registration.status}</span><h3>{registration.event?.title || "Event"}</h3><p>{registration.event ? `${formatDate(registration.event.date)} · ${registration.event.location}` : "Event details unavailable"}</p><small>{bookedQuantity} ticket{bookedQuantity === 1 ? "" : "s"} · {formatMoney(savedTotal)}</small></div><div className="ticket-code"><span>TICKET NUMBER</span><strong>{registration.ticketNumber}</strong></div></article>; })}</div>}</section>}
 
       <section className="organize shell" id="organize">
         <div className="organize-intro"><div className="eyebrow">For the ones who bring us together</div><h2>Have an idea?<br /><em>Bring it to life.</em></h2><p>Create an event people will talk about long after it ends.</p></div>
