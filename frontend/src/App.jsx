@@ -25,6 +25,7 @@ function App() {
   const [selectedEvent, setSelectedEvent] = useState(null);
   const [authBusy, setAuthBusy] = useState(false);
   const [authMode, setAuthMode] = useState("login");
+  const [view, setView] = useState(() => window.location.hash === "#profile" ? "profile" : "home");
   const [authForm, setAuthForm] = useState({ name: "", email: "", password: "", role: "attendee" });
   const [user, setUser] = useState(() => JSON.parse(localStorage.getItem("evently_user") || "null"));
   const [eventForm, setEventForm] = useState({
@@ -92,12 +93,17 @@ function App() {
     request("/auth/me", { headers: { Authorization: `Bearer ${token}` } })
       .then(({ user: account }) => {
         if (active) {
-          const profile = { id: account.id || account._id, name: account.name, email: account.email, role: account.role };
+          const profile = { id: account.id || account._id, name: account.name, email: account.email, avatar: account.avatar || "", role: account.role };
           localStorage.setItem("evently_user", JSON.stringify(profile));
           setUser(profile);
         }
       }).catch(() => {});
     return () => { active = false; };
+  }, []);
+  useEffect(() => {
+    const handleHashChange = () => setView(window.location.hash === "#profile" ? "profile" : "home");
+    window.addEventListener("hashchange", handleHashChange);
+    return () => window.removeEventListener("hashchange", handleHashChange);
   }, []);
   useEffect(() => { loadMyEvents(); }, [user]);
   useEffect(() => { loadRegistrations(); }, [user]);
@@ -235,6 +241,10 @@ function App() {
         </div>
       </nav>
 
+      {view === "profile" && user ? <Profile key={user.id || user._id} user={user} request={request} onSaved={(profile) => {
+        localStorage.setItem("evently_user", JSON.stringify(profile));
+        setUser(profile);
+      }} /> : <>
       <section className="hero shell" id="top">
         <div className="hero-copy">
           <div className="eyebrow"><span className="pulse" /> Curated experiences, made simple</div>
@@ -245,11 +255,6 @@ function App() {
         </div>
         <div className="hero-art"><div className="art-card card-back" /><div className="art-card card-main"><div className="art-label">NEXT EVENT</div><div className="art-date">18<span>MAR</span></div><div className="art-title">Creative<br />Mornings</div><div className="art-meta">Bengaluru · 09:00 AM</div></div><div className="floating-note">✦ <span>Good things<br />are waiting.</span></div></div>
       </section>
-
-      {user && <Profile key={user.id || user._id} user={user} request={request} onSaved={(profile) => {
-        localStorage.setItem("evently_user", JSON.stringify(profile));
-        setUser(profile);
-      }} />}
 
       <section className="discover shell" id="discover">
         <div className="section-heading"><div><div className="eyebrow">Find your people</div><h2>Events worth showing up for.</h2></div><div className="search-wrap"><span>⌕</span><input value={search} onChange={(event) => setSearch(event.target.value)} onKeyDown={(event) => event.key === "Enter" && loadEvents()} placeholder="Search events" /></div></div>
@@ -269,6 +274,8 @@ function App() {
       {selectedEvent && <div className="modal-backdrop" role="presentation" onClick={() => setSelectedEvent(null)}><section className="event-modal" role="dialog" aria-modal="true" aria-label="Event details" onClick={(clickEvent) => clickEvent.stopPropagation()}><button className="modal-close" onClick={() => setSelectedEvent(null)} aria-label="Close event details">×</button>{selectedEvent.image && <div className="modal-image" style={{ backgroundImage: `url(${selectedEvent.image})` }} />}<div className="modal-body"><div className="modal-kicker"><span className="status-pill approved">{selectedEvent.category}</span><span>{formatPrice(selectedEvent.ticketPrice)}</span></div><h2>{selectedEvent.title}</h2><p className="modal-description">{selectedEvent.description}</p><div className="event-detail-grid"><div><span>WHEN</span><strong>{formatDateTime(selectedEvent.date)}</strong></div><div><span>WHERE</span><strong>{selectedEvent.location}</strong></div><div><span>AVAILABILITY</span><strong>{selectedEvent.availableSeats} seats left</strong></div><div><span>ORGANIZED BY</span><strong>{selectedEvent.organizer?.name || "Event organizer"}</strong></div></div><button className="primary-button modal-reserve" onClick={() => { registerForEvent(selectedEvent._id); setSelectedEvent(null); }}>Reserve your spot <span>→</span></button></div></section></div>}
 
       <section className="auth shell" id="auth"><div className="auth-copy"><div className="eyebrow">Your event journey</div><h2>Be part of<br /><em>something good.</em></h2><p>Sign in to reserve your spot, or create an organizer account to bring your own event to life.</p></div><form className="auth-form" onSubmit={handleAuth}><div className="tabs"><button type="button" className={authMode === "login" ? "active" : ""} onClick={() => setAuthMode("login")}>Sign in</button><button type="button" className={authMode === "register" ? "active" : ""} onClick={() => setAuthMode("register")}>Create account</button></div>{authMode === "register" && <input name="name" value={authForm.name} onChange={updateForm(setAuthForm)} placeholder="Full name" required />}<input type="email" name="email" value={authForm.email} onChange={updateForm(setAuthForm)} placeholder="Email address" required /><input type="password" name="password" value={authForm.password} onChange={updateForm(setAuthForm)} placeholder="Password (6+ characters)" required />{authMode === "register" && <select name="role" value={authForm.role} onChange={updateForm(setAuthForm)}><option value="attendee">I want to attend events</option><option value="organizer">I want to organize events</option></select>}<button className="primary-button" type="submit" disabled={authBusy}>{authBusy ? "Please wait…" : authMode === "login" ? "Sign in" : "Create account"} <span>→</span></button></form></section>
+
+      </>}
 
       <footer className="footer shell" id="about"><a className="brand" href="#top"><span className="brand-mark">✦</span> evently</a><span>Made for meaningful moments.</span><span>© 2026 Evently</span></footer>
     </main>

@@ -23,7 +23,7 @@ export async function register(req, res) {
 
   res.status(201).json({
     token: createToken(user._id),
-    user: { id: user._id, name: user.name, email: user.email, role: user.role }
+    user: { id: user._id, name: user.name, email: user.email, avatar: user.avatar || "", role: user.role }
   });
 }
 
@@ -37,7 +37,7 @@ export async function login(req, res) {
 
   res.json({
     token: createToken(user._id),
-    user: { id: user._id, name: user.name, email: user.email, role: user.role }
+    user: { id: user._id, name: user.name, email: user.email, avatar: user.avatar || "", role: user.role }
   });
 }
 
@@ -46,7 +46,7 @@ export function currentUser(req, res) {
 }
 
 export async function updateProfile(req, res) {
-  const { name, email, currentPassword } = req.body || {};
+  const { name, email, avatar, currentPassword } = req.body || {};
   if (typeof name !== "string" || name.trim().length < 2 || name.trim().length > 80) {
     return res.status(400).json({ message: "Name must contain 2 to 80 characters" });
   }
@@ -54,6 +54,9 @@ export async function updateProfile(req, res) {
     return res.status(400).json({ message: "Enter a valid email address" });
   }
   const normalizedEmail = email.trim().toLowerCase();
+  if (avatar !== undefined && (typeof avatar !== "string" || avatar.length > 2_000_000 || (avatar && !/^(https?:\/\/|data:image\/(?:png|jpe?g|webp);base64,)/i.test(avatar)))) {
+    return res.status(400).json({ message: "Profile photo must be a JPG, PNG, or WEBP image" });
+  }
   if (normalizedEmail !== req.user.email) {
     const account = await User.findById(req.user._id).select("+password");
     if (!account || typeof currentPassword !== "string" || !(await bcrypt.compare(currentPassword, account.password))) {
@@ -61,13 +64,15 @@ export async function updateProfile(req, res) {
     }
   }
   try {
+    const changes = { name: name.trim(), email: normalizedEmail };
+    if (typeof avatar === "string") changes.avatar = avatar;
     const user = await User.findByIdAndUpdate(
       req.user._id,
-      { $set: { name: name.trim(), email: normalizedEmail } },
+      { $set: changes },
       { new: true, runValidators: true }
     );
     if (!user) return res.status(404).json({ message: "Account not found" });
-    return res.json({ user: { id: user._id, name: user.name, email: user.email, role: user.role } });
+    return res.json({ user: { id: user._id, name: user.name, email: user.email, avatar: user.avatar || "", role: user.role } });
   } catch (error) {
     if (error.code === 11000) return res.status(409).json({ message: "That email is already registered" });
     throw error;
