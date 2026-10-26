@@ -26,6 +26,9 @@ function App() {
   const [categoryFilter, setCategoryFilter] = useState("all");
   const [dateFilter, setDateFilter] = useState("all");
   const [placeFilter, setPlaceFilter] = useState("all");
+  const [sortOrder, setSortOrder] = useState("date");
+  const [savedOnly, setSavedOnly] = useState(false);
+  const [savedEvents, setSavedEvents] = useState(() => JSON.parse(localStorage.getItem("evently_saved_events") || "[]"));
   const [loading, setLoading] = useState(true);
   const [notice, setNotice] = useState("");
   const [toast, setToast] = useState(null);
@@ -49,19 +52,25 @@ function App() {
     const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1);
     const endOfNext30Days = new Date(now);
     endOfNext30Days.setDate(endOfNext30Days.getDate() + 30);
-    return events.filter((event) => {
+    const filteredEvents = events.filter((event) => {
       const eventDate = new Date(event.date);
       const matchesSearch = !term || `${event.title} ${event.category} ${event.location}`.toLowerCase().includes(term);
       const matchesCategory = categoryFilter === "all" || event.category === categoryFilter;
       const matchesPlace = placeFilter === "all" || event.location === placeFilter;
+      const matchesSaved = !savedOnly || savedEvents.includes(event._id);
       const matchesDate = dateFilter === "all"
         || (dateFilter === "today" && eventDate >= startOfToday && eventDate < endOfToday)
         || (dateFilter === "week" && eventDate >= startOfToday && eventDate < endOfWeek)
         || (dateFilter === "month" && eventDate >= startOfToday && eventDate < endOfMonth)
         || (dateFilter === "next30" && eventDate >= now && eventDate <= endOfNext30Days);
-      return matchesSearch && matchesCategory && matchesPlace && matchesDate;
+      return matchesSearch && matchesCategory && matchesPlace && matchesDate && matchesSaved;
     });
-  }, [events, search, categoryFilter, dateFilter, placeFilter]);
+    return filteredEvents.sort((a, b) => sortOrder === "price"
+      ? (Number(a.ticketPrice) || 0) - (Number(b.ticketPrice) || 0)
+      : sortOrder === "price-high"
+        ? (Number(b.ticketPrice) || 0) - (Number(a.ticketPrice) || 0)
+        : new Date(a.date) - new Date(b.date));
+  }, [events, search, categoryFilter, dateFilter, placeFilter, sortOrder, savedOnly, savedEvents]);
 
   const categories = useMemo(() => [...new Set(events.map((event) => event.category).filter(Boolean))].sort(), [events]);
   const places = useMemo(() => [...new Set(events.map((event) => event.location).filter(Boolean))].sort(), [events]);
@@ -153,6 +162,16 @@ function App() {
     setCategoryFilter("all");
     setDateFilter("all");
     setPlaceFilter("all");
+    setSortOrder("date");
+    setSavedOnly(false);
+  }
+
+  function toggleSaved(eventId) {
+    setSavedEvents((current) => {
+      const next = current.includes(eventId) ? current.filter((id) => id !== eventId) : [...current, eventId];
+      localStorage.setItem("evently_saved_events", JSON.stringify(next));
+      return next;
+    });
   }
 
   async function handleAuth(event) {
@@ -282,9 +301,10 @@ function App() {
 
       <section className="discover shell" id="discover">
         <div className="section-heading"><div><div className="eyebrow">Find your people</div><h2>Events worth showing up for.</h2></div><div className="search-wrap"><span>⌕</span><input value={search} onChange={(event) => setSearch(event.target.value)} onKeyDown={(event) => event.key === "Enter" && loadEvents()} placeholder="Search events" /></div></div>
-        <div className="filter-bar" aria-label="Filter events"><label><span>Type</span><select value={categoryFilter} onChange={(event) => setCategoryFilter(event.target.value)}><option value="all">All types</option>{categories.map((category) => <option key={category} value={category}>{category}</option>)}</select></label><label><span>Date</span><select value={dateFilter} onChange={(event) => setDateFilter(event.target.value)}><option value="all">Any date</option><option value="today">Today</option><option value="week">This week</option><option value="month">This month</option><option value="next30">Next 30 days</option></select></label><label><span>Place</span><select value={placeFilter} onChange={(event) => setPlaceFilter(event.target.value)}><option value="all">All places</option>{places.map((place) => <option key={place} value={place}>{place}</option>)}</select></label><button className="ghost-button filter-reset" type="button" onClick={resetFilters}>Reset filters</button><span className="filter-count">{visibleEvents.length} event{visibleEvents.length === 1 ? "" : "s"}</span></div>
+        <div className="filter-bar" aria-label="Filter events"><label><span>Date</span><select value={dateFilter} onChange={(event) => setDateFilter(event.target.value)}><option value="all">Any date</option><option value="today">Today</option><option value="week">This week</option><option value="month">This month</option><option value="next30">Next 30 days</option></select></label><label><span>City / place</span><select value={placeFilter} onChange={(event) => setPlaceFilter(event.target.value)}><option value="all">All places</option>{places.map((place) => <option key={place} value={place}>{place}</option>)}</select></label><label><span>Sort by</span><select value={sortOrder} onChange={(event) => setSortOrder(event.target.value)}><option value="date">Soonest first</option><option value="price">Price: low to high</option><option value="price-high">Price: high to low</option></select></label><button className={`ghost-button saved-filter${savedOnly ? " active" : ""}`} type="button" onClick={() => setSavedOnly((value) => !value)}>♡ Saved</button><button className="ghost-button filter-reset" type="button" onClick={resetFilters}>Reset</button><span className="filter-count">{visibleEvents.length} event{visibleEvents.length === 1 ? "" : "s"}</span></div>
+        <div className="category-chips" aria-label="Event categories"><button className={categoryFilter === "all" ? "active" : ""} type="button" onClick={() => setCategoryFilter("all")}>All events</button>{categories.map((category) => <button className={categoryFilter === category ? "active" : ""} type="button" key={category} onClick={() => setCategoryFilter(category)}>{category}</button>)}</div>
         {notice && <div className="notice">{notice}</div>}
-        {loading ? <p className="muted">Loading events…</p> : visibleEvents.length === 0 ? <div className="empty"><span>✦</span><h3>Your next event starts here.</h3><p>No approved events yet. Organizers can submit an event below; it will appear here after admin approval.</p><a className="text-link" href="#add-event">Create an event ↗</a></div> : <div className="event-grid">{visibleEvents.map((event) => <article className="event-card clickable" key={event._id} onClick={() => openEvent(event)}><div className="event-image" style={event.image ? { backgroundImage: `linear-gradient(180deg, #102a4310, #102a43aa), url(${event.image})` } : undefined}><span>{event.category}</span><b>{new Date(event.date).getDate()}</b></div><div className="event-content"><div className="event-date">{formatDate(event.date)}</div><h3>{event.title}</h3><p>{event.location}</p><div className="event-footer"><span>{formatPrice(event.ticketPrice)}</span><button onClick={(clickEvent) => { clickEvent.stopPropagation(); openEvent(event); }}>Choose tickets →</button></div></div></article>)}</div>}
+        {loading ? <p className="muted">Loading events…</p> : visibleEvents.length === 0 ? <div className="empty"><span>✦</span><h3>{savedOnly ? "No saved events match these filters." : "Your next event starts here."}</h3><p>{savedOnly ? "Save events with the heart icon and they will appear here." : "No approved events yet. Organizers can submit an event below; it will appear here after admin approval."}</p>{savedOnly ? <button className="text-link empty-action" type="button" onClick={resetFilters}>Show all events ↗</button> : <a className="text-link" href="#add-event">Create an event ↗</a>}</div> : <div className="event-grid">{visibleEvents.map((event) => <article className="event-card clickable" key={event._id} onClick={() => openEvent(event)}><div className="event-image" style={event.image ? { backgroundImage: `linear-gradient(180deg, #102a4310, #102a43aa), url(${event.image})` } : undefined}><span>{event.category}</span><button className={`favorite-button${savedEvents.includes(event._id) ? " saved" : ""}`} type="button" onClick={(clickEvent) => { clickEvent.stopPropagation(); toggleSaved(event._id); }} aria-label={savedEvents.includes(event._id) ? "Remove from saved events" : "Save event"} aria-pressed={savedEvents.includes(event._id)}>{savedEvents.includes(event._id) ? "♥" : "♡"}</button><b>{new Date(event.date).getDate()}</b></div><div className="event-content"><div className="event-date">{formatDate(event.date)}</div><h3>{event.title}</h3><p>{event.location}</p><div className="event-footer"><span>{formatPrice(event.ticketPrice)}</span><button onClick={(clickEvent) => { clickEvent.stopPropagation(); openEvent(event); }}>Choose tickets →</button></div></div></article>)}</div>}
       </section>
 
       {user?.role === "attendee" && <section className="tickets shell" id="bookings"><div className="section-heading"><div><div className="eyebrow">Your event pass</div><h2>My bookings.</h2></div><span className="muted">{registrations.length} booking{registrations.length === 1 ? "" : "s"}</span></div>{registrations.length === 0 ? <div className="submission-empty">Your confirmed event tickets will appear here after you reserve a spot.</div> : <div className="ticket-grid">{registrations.map((registration) => { const bookedQuantity = registration.quantity || 1; const savedTotal = registration.totalAmount ?? ((Number(registration.event?.ticketPrice) || 0) * bookedQuantity * 1.18); return <article className="ticket-card" key={registration._id}><div className="ticket-accent" /><div className="ticket-main"><span className="status-pill confirmed">{registration.status}</span><h3>{registration.event?.title || "Event"}</h3><p>{registration.event ? `${formatDate(registration.event.date)} · ${registration.event.location}` : "Event details unavailable"}</p><small>{bookedQuantity} ticket{bookedQuantity === 1 ? "" : "s"} · {formatMoney(savedTotal)}</small></div><div className="ticket-code"><span>TICKET NUMBER</span><strong>{registration.ticketNumber}</strong></div></article>; })}</div>}</section>}
