@@ -16,6 +16,10 @@ function formatPrice(value) {
   return Number(value) > 0 ? `₹${Number(value).toLocaleString("en-IN")}` : "Free entry";
 }
 
+function formatMoney(value) {
+  return `₹${Number(value || 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
 function App() {
   const [events, setEvents] = useState([]);
   const [search, setSearch] = useState("");
@@ -24,6 +28,7 @@ function App() {
   const [myEvents, setMyEvents] = useState([]);
   const [registrations, setRegistrations] = useState([]);
   const [selectedEvent, setSelectedEvent] = useState(null);
+  const [ticketQuantity, setTicketQuantity] = useState(1);
   const [authBusy, setAuthBusy] = useState(false);
   const [authMode, setAuthMode] = useState("login");
   const [view, setView] = useState(() => window.location.hash === "#profile" ? "profile" : window.location.hash === "#add-event" ? "add-event" : "home");
@@ -34,6 +39,10 @@ function App() {
     if (!term) return events;
     return events.filter((event) => `${event.title} ${event.category} ${event.location}`.toLowerCase().includes(term));
   }, [events, search]);
+
+  const upcomingEvent = useMemo(() => events
+    .filter((event) => new Date(event.date).getTime() > Date.now())
+    .sort((a, b) => new Date(a.date) - new Date(b.date))[0] || null, [events]);
 
   async function request(path, options = {}) {
     const { headers: optionHeaders = {}, ...requestOptions } = options;
@@ -124,14 +133,17 @@ function App() {
     }
   }
 
-  async function registerForEvent(id) {
+  async function registerForEvent(id, quantity = ticketQuantity) {
     if (!user) return setNotice("Please log in before registering for an event.");
     try {
       const data = await request(`/registrations/events/${id}`, {
         method: "POST",
-        headers: { Authorization: `Bearer ${localStorage.getItem("evently_token")}` }
+        headers: { Authorization: `Bearer ${localStorage.getItem("evently_token")}` },
+        body: JSON.stringify({ quantity })
       });
-      setNotice(`Registration confirmed. Ticket: ${data.registration.ticketNumber}`);
+      setNotice(`${quantity} ticket${quantity === 1 ? "" : "s"} confirmed. Total: ${formatMoney(data.pricing?.totalAmount ?? data.registration.totalAmount)}.`);
+      setSelectedEvent(null);
+      setTicketQuantity(1);
       loadEvents();
       loadRegistrations();
     } catch (error) {
@@ -140,6 +152,7 @@ function App() {
   }
 
   async function openEvent(event) {
+    setTicketQuantity(1);
     try {
       const data = await request(`/events/${event._id}`);
       setSelectedEvent(data.event);
@@ -185,6 +198,10 @@ function App() {
   }
 
   const isOrganizer = user?.role === "organizer" || user?.role === "admin";
+  const selectedTicketLimit = selectedEvent ? Math.min(10, Math.max(1, Number(selectedEvent.availableSeats) || 1)) : 1;
+  const selectedSubtotal = selectedEvent ? (Number(selectedEvent.ticketPrice) || 0) * ticketQuantity : 0;
+  const selectedGst = Number((selectedSubtotal * 0.18).toFixed(2));
+  const selectedTotal = Number((selectedSubtotal + selectedGst).toFixed(2));
 
   return (
     <main>
@@ -210,16 +227,16 @@ function App() {
           <div className="hero-actions"><a className="primary-button" href="#discover">Explore events <span>→</span></a><a className="text-link" href="#add-event">I want to host <span>↗</span></a></div>
           <div className="social-proof"><div className="avatar-stack"><i>RK</i><i>AS</i><i>MP</i><i>+</i></div><span><strong>2,400+</strong> people found their next experience</span></div>
         </div>
-        <div className="hero-art"><div className="art-card card-back" /><div className="art-card card-main"><div className="art-label">NEXT EVENT</div><div className="art-date">18<span>MAR</span></div><div className="art-title">Creative<br />Mornings</div><div className="art-meta">Bengaluru · 09:00 AM</div></div><div className="floating-note">✦ <span>Good things<br />are waiting.</span></div></div>
+        <div className="hero-art"><div className="art-card card-back" /><div className={`art-card card-main${upcomingEvent ? " interactive-card" : ""}`} onClick={() => upcomingEvent && openEvent(upcomingEvent)} onKeyDown={(event) => event.key === "Enter" && upcomingEvent && openEvent(upcomingEvent)} role={upcomingEvent ? "button" : undefined} tabIndex={upcomingEvent ? 0 : undefined}><div className="art-label">{upcomingEvent ? "UPCOMING EVENT" : "NO UPCOMING EVENT"}</div>{upcomingEvent ? <><div className="art-date">{new Date(upcomingEvent.date).getDate()}<span>{new Intl.DateTimeFormat("en-IN", { month: "short" }).format(new Date(upcomingEvent.date)).toUpperCase()}</span></div><div className="art-title">{upcomingEvent.title}</div><div className="art-meta">{upcomingEvent.location} · {new Intl.DateTimeFormat("en-IN", { timeStyle: "short" }).format(new Date(upcomingEvent.date))}</div><div className="hero-event-hint">Click to view details →</div></> : <><div className="art-date upcoming-empty">—<span>SOON</span></div><div className="art-title">Your next<br />experience.</div><div className="art-meta">New events are on the way</div></>}</div><div className="floating-note">✦ <span>Good things<br />are waiting.</span></div></div>
       </section>
 
       <section className="discover shell" id="discover">
         <div className="section-heading"><div><div className="eyebrow">Find your people</div><h2>Events worth showing up for.</h2></div><div className="search-wrap"><span>⌕</span><input value={search} onChange={(event) => setSearch(event.target.value)} onKeyDown={(event) => event.key === "Enter" && loadEvents()} placeholder="Search events" /></div></div>
         {notice && <div className="notice">{notice}</div>}
-        {loading ? <p className="muted">Loading events…</p> : visibleEvents.length === 0 ? <div className="empty"><span>✦</span><h3>Your next event starts here.</h3><p>No approved events yet. Organizers can submit an event below; it will appear here after admin approval.</p><a className="text-link" href="#add-event">Create an event ↗</a></div> : <div className="event-grid">{visibleEvents.map((event) => <article className="event-card clickable" key={event._id} onClick={() => openEvent(event)}><div className="event-image" style={event.image ? { backgroundImage: `linear-gradient(180deg, #102a4310, #102a43aa), url(${event.image})` } : undefined}><span>{event.category}</span><b>{new Date(event.date).getDate()}</b></div><div className="event-content"><div className="event-date">{formatDate(event.date)}</div><h3>{event.title}</h3><p>{event.location}</p><div className="event-footer"><span>{formatPrice(event.ticketPrice)}</span><button onClick={(clickEvent) => { clickEvent.stopPropagation(); registerForEvent(event._id); }}>Reserve spot →</button></div></div></article>)}</div>}
+        {loading ? <p className="muted">Loading events…</p> : visibleEvents.length === 0 ? <div className="empty"><span>✦</span><h3>Your next event starts here.</h3><p>No approved events yet. Organizers can submit an event below; it will appear here after admin approval.</p><a className="text-link" href="#add-event">Create an event ↗</a></div> : <div className="event-grid">{visibleEvents.map((event) => <article className="event-card clickable" key={event._id} onClick={() => openEvent(event)}><div className="event-image" style={event.image ? { backgroundImage: `linear-gradient(180deg, #102a4310, #102a43aa), url(${event.image})` } : undefined}><span>{event.category}</span><b>{new Date(event.date).getDate()}</b></div><div className="event-content"><div className="event-date">{formatDate(event.date)}</div><h3>{event.title}</h3><p>{event.location}</p><div className="event-footer"><span>{formatPrice(event.ticketPrice)}</span><button onClick={(clickEvent) => { clickEvent.stopPropagation(); openEvent(event); }}>Choose tickets →</button></div></div></article>)}</div>}
       </section>
 
-      {user?.role === "attendee" && <section className="tickets shell"><div className="section-heading"><div><div className="eyebrow">Your event pass</div><h2>My bookings.</h2></div><span className="muted">{registrations.length} booking{registrations.length === 1 ? "" : "s"}</span></div>{registrations.length === 0 ? <div className="submission-empty">Your confirmed event tickets will appear here after you reserve a spot.</div> : <div className="ticket-grid">{registrations.map((registration) => <article className="ticket-card" key={registration._id}><div className="ticket-accent" /><div className="ticket-main"><span className="status-pill confirmed">{registration.status}</span><h3>{registration.event?.title || "Event"}</h3><p>{registration.event ? `${formatDate(registration.event.date)} · ${registration.event.location}` : "Event details unavailable"}</p></div><div className="ticket-code"><span>TICKET NUMBER</span><strong>{registration.ticketNumber}</strong></div></article>)}</div>}</section>}
+      {user?.role === "attendee" && <section className="tickets shell"><div className="section-heading"><div><div className="eyebrow">Your event pass</div><h2>My bookings.</h2></div><span className="muted">{registrations.length} booking{registrations.length === 1 ? "" : "s"}</span></div>{registrations.length === 0 ? <div className="submission-empty">Your confirmed event tickets will appear here after you reserve a spot.</div> : <div className="ticket-grid">{registrations.map((registration) => { const bookedQuantity = registration.quantity || 1; const savedTotal = registration.totalAmount ?? ((Number(registration.event?.ticketPrice) || 0) * bookedQuantity * 1.18); return <article className="ticket-card" key={registration._id}><div className="ticket-accent" /><div className="ticket-main"><span className="status-pill confirmed">{registration.status}</span><h3>{registration.event?.title || "Event"}</h3><p>{registration.event ? `${formatDate(registration.event.date)} · ${registration.event.location}` : "Event details unavailable"}</p><small>{bookedQuantity} ticket{bookedQuantity === 1 ? "" : "s"} · {formatMoney(savedTotal)}</small></div><div className="ticket-code"><span>TICKET NUMBER</span><strong>{registration.ticketNumber}</strong></div></article>; })}</div>}</section>}
 
       <section className="organize shell" id="organize">
         <div className="organize-intro"><div className="eyebrow">For the ones who bring us together</div><h2>Have an idea?<br /><em>Bring it to life.</em></h2><p>Create an event people will talk about long after it ends.</p></div>
@@ -228,7 +245,7 @@ function App() {
 
       {isOrganizer && <section className="my-events shell" id={user.role === "admin" ? "admin-review" : undefined}><div className="section-heading"><div><div className="eyebrow">{user.role === "admin" ? "Control center" : "Your organizer space"}</div><h2>{user.role === "admin" ? "Review events." : "Your submissions."}</h2></div><span className="muted">{myEvents.length} event{myEvents.length === 1 ? "" : "s"}</span></div>{myEvents.length === 0 ? <div className="submission-empty">{user.role === "admin" ? "No event submissions need review." : "Your submitted events will appear here with their approval status."}</div> : <div className="submission-grid">{myEvents.map((event) => <article className="submission-card" key={event._id}><div><span className={`status-pill ${event.status}`}>{event.status}</span><h3>{event.title}</h3><p>{formatDate(event.date)} · {event.location}</p>{user.role === "admin" && <p className="submission-organizer">Organizer: {event.organizer?.name || "Unknown"}</p>}</div>{user.role === "admin" ? <div className="moderation-actions">{event.status === "pending" && <><button className="approve-button" onClick={() => moderateEvent(event._id, "approved")}>Approve</button><button className="reject-button" onClick={() => moderateEvent(event._id, "rejected")}>Reject</button></>}<button className="delete-button" onClick={() => deleteEvent(event._id)}>Delete</button></div> : <span className="submission-arrow">↗</span>}</article>)}</div>}</section>}
 
-      {selectedEvent && <div className="modal-backdrop" role="presentation" onClick={() => setSelectedEvent(null)}><section className="event-modal" role="dialog" aria-modal="true" aria-label="Event details" onClick={(clickEvent) => clickEvent.stopPropagation()}><button className="modal-close" onClick={() => setSelectedEvent(null)} aria-label="Close event details">×</button>{selectedEvent.image && <div className="modal-image" style={{ backgroundImage: `url(${selectedEvent.image})` }} />}<div className="modal-body"><div className="modal-kicker"><span className="status-pill approved">{selectedEvent.category}</span><span>{formatPrice(selectedEvent.ticketPrice)}</span></div><h2>{selectedEvent.title}</h2><p className="modal-description">{selectedEvent.description}</p><div className="event-detail-grid"><div><span>WHEN</span><strong>{formatDateTime(selectedEvent.date)}</strong></div><div><span>WHERE</span><strong>{selectedEvent.location}</strong></div><div><span>AVAILABILITY</span><strong>{selectedEvent.availableSeats} seats left</strong></div><div><span>ORGANIZED BY</span><strong>{selectedEvent.organizer?.name || "Event organizer"}</strong></div></div><button className="primary-button modal-reserve" onClick={() => { registerForEvent(selectedEvent._id); setSelectedEvent(null); }}>Reserve your spot <span>→</span></button></div></section></div>}
+      {selectedEvent && <div className="modal-backdrop" role="presentation" onClick={() => setSelectedEvent(null)}><section className="event-modal" role="dialog" aria-modal="true" aria-label="Event details" onClick={(clickEvent) => clickEvent.stopPropagation()}><button className="modal-close" onClick={() => setSelectedEvent(null)} aria-label="Close event details">×</button>{selectedEvent.image && <div className="modal-image" style={{ backgroundImage: `url(${selectedEvent.image})` }} />}<div className="modal-body"><div className="modal-kicker"><span className="status-pill approved">{selectedEvent.category}</span><span>{formatPrice(selectedEvent.ticketPrice)}</span></div><h2>{selectedEvent.title}</h2><p className="modal-description">{selectedEvent.description}</p><div className="event-detail-grid"><div><span>WHEN</span><strong>{formatDateTime(selectedEvent.date)}</strong></div><div><span>WHERE</span><strong>{selectedEvent.location}</strong></div><div><span>AVAILABILITY</span><strong>{selectedEvent.availableSeats} seats left</strong></div><div><span>ORGANIZED BY</span><strong>{selectedEvent.organizer?.name || "Event organizer"}</strong></div></div><div className="ticket-booking-panel"><div className="ticket-quantity-row"><div><span className="booking-label">Tickets</span><small>Maximum 10 tickets per booking</small></div><div className="quantity-control"><button type="button" onClick={() => setTicketQuantity((quantity) => Math.max(1, quantity - 1))} disabled={ticketQuantity <= 1}>−</button><strong>{ticketQuantity}</strong><button type="button" onClick={() => setTicketQuantity((quantity) => Math.min(selectedTicketLimit, quantity + 1))} disabled={ticketQuantity >= selectedTicketLimit}>+</button></div></div><div className="booking-pricing"><div><span>Ticket price</span><strong>{formatMoney(Number(selectedEvent.ticketPrice) || 0)} × {ticketQuantity}</strong></div><div><span>Subtotal</span><strong>{formatMoney(selectedSubtotal)}</strong></div><div><span>GST (18%)</span><strong>{formatMoney(selectedGst)}</strong></div><div className="booking-total"><span>Total payable</span><strong>{formatMoney(selectedTotal)}</strong></div></div></div><button className="primary-button modal-reserve" disabled={!user || Number(selectedEvent.availableSeats) < 1} onClick={() => registerForEvent(selectedEvent._id, ticketQuantity)}>{user ? `Book ${ticketQuantity} ticket${ticketQuantity === 1 ? "" : "s"}` : "Sign in to book"} <span>→</span></button></div></section></div>}
 
       <section className="auth shell" id="auth"><div className="auth-copy"><div className="eyebrow">Your event journey</div><h2>Be part of<br /><em>something good.</em></h2><p>Sign in to reserve your spot, or create an organizer account to bring your own event to life.</p></div><form className="auth-form" onSubmit={handleAuth}><div className="tabs"><button type="button" className={authMode === "login" ? "active" : ""} onClick={() => setAuthMode("login")}>Sign in</button><button type="button" className={authMode === "register" ? "active" : ""} onClick={() => setAuthMode("register")}>Create account</button></div>{authMode === "register" && <input name="name" value={authForm.name} onChange={updateForm(setAuthForm)} placeholder="Full name" required />}<input type="email" name="email" value={authForm.email} onChange={updateForm(setAuthForm)} placeholder="Email address" required /><input type="password" name="password" value={authForm.password} onChange={updateForm(setAuthForm)} placeholder="Password (6+ characters)" required />{authMode === "register" && <select name="role" value={authForm.role} onChange={updateForm(setAuthForm)}><option value="attendee">I want to attend events</option><option value="organizer">I want to organize events</option></select>}<button className="primary-button" type="submit" disabled={authBusy}>{authBusy ? "Please wait…" : authMode === "login" ? "Sign in" : "Create account"} <span>→</span></button></form></section>
 
