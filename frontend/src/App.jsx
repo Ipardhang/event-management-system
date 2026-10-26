@@ -20,6 +20,20 @@ function formatMoney(value) {
   return `₹${Number(value || 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
+function formatCountdown(value, now) {
+  const difference = new Date(value).getTime() - now;
+  if (difference <= 0) return "Starting now";
+  const totalMinutes = Math.floor(difference / 60000);
+  const days = Math.floor(totalMinutes / 1440);
+  const hours = Math.floor((totalMinutes % 1440) / 60);
+  const minutes = totalMinutes % 60;
+  return days > 0 ? `${days}d ${hours}h` : `${hours}h ${minutes}m`;
+}
+
+function calendarDate(value) {
+  return new Date(value).toISOString().replace(/[-:]/g, "").replace(/\.\d{3}/, "");
+}
+
 function App() {
   const [events, setEvents] = useState([]);
   const [search, setSearch] = useState("");
@@ -32,6 +46,7 @@ function App() {
   const [loading, setLoading] = useState(true);
   const [notice, setNotice] = useState("");
   const [toast, setToast] = useState(null);
+  const [currentTime, setCurrentTime] = useState(Date.now());
   const [myEvents, setMyEvents] = useState([]);
   const [registrations, setRegistrations] = useState([]);
   const [selectedEvent, setSelectedEvent] = useState(null);
@@ -153,6 +168,10 @@ function App() {
     const timer = window.setTimeout(() => setToast(null), 5000);
     return () => window.clearTimeout(timer);
   }, [toast]);
+  useEffect(() => {
+    const timer = window.setInterval(() => setCurrentTime(Date.now()), 60000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   function showToast(message, type = "success") {
     setToast({ message, type });
@@ -172,6 +191,33 @@ function App() {
       localStorage.setItem("evently_saved_events", JSON.stringify(next));
       return next;
     });
+  }
+
+  async function shareEvent(event) {
+    const shareData = { title: event.title, text: `${event.title} · ${event.location}`, url: window.location.href };
+    try {
+      if (navigator.share) {
+        await navigator.share(shareData);
+      } else {
+        await navigator.clipboard.writeText(`${event.title} · ${event.location}\n${window.location.href}`);
+        showToast("Event details copied to clipboard.");
+      }
+    } catch (error) {
+      if (error.name !== "AbortError") showToast("Could not share this event.", "error");
+    }
+  }
+
+  function addToCalendar(event) {
+    const start = new Date(event.date);
+    const end = new Date(start.getTime() + 2 * 60 * 60 * 1000);
+    const params = new URLSearchParams({
+      action: "TEMPLATE",
+      text: event.title,
+      dates: `${calendarDate(start)}/${calendarDate(end)}`,
+      details: event.description || "Evently event",
+      location: event.location || ""
+    });
+    window.open(`https://calendar.google.com/calendar/render?${params.toString()}`, "_blank", "noopener,noreferrer");
   }
 
   async function handleAuth(event) {
@@ -296,7 +342,7 @@ function App() {
           <div className="hero-actions"><a className="primary-button" href="#discover">Explore events <span>→</span></a><a className="text-link" href="#add-event">I want to host <span>↗</span></a></div>
           <div className="social-proof"><div className="avatar-stack"><i>RK</i><i>AS</i><i>MP</i><i>+</i></div><span><strong>2,400+</strong> people found their next experience</span></div>
         </div>
-        <div className="hero-art"><div className="art-card card-back" /><div className={`art-card card-main${upcomingEvent ? " interactive-card" : ""}`} onClick={() => upcomingEvent && openEvent(upcomingEvent)} onKeyDown={(event) => event.key === "Enter" && upcomingEvent && openEvent(upcomingEvent)} role={upcomingEvent ? "button" : undefined} tabIndex={upcomingEvent ? 0 : undefined}><div className="art-label">{upcomingEvent ? "UPCOMING EVENT" : "NO UPCOMING EVENT"}</div>{upcomingEvent ? <><div className="art-date">{new Date(upcomingEvent.date).getDate()}<span>{new Intl.DateTimeFormat("en-IN", { month: "short" }).format(new Date(upcomingEvent.date)).toUpperCase()}</span></div><div className="art-title">{upcomingEvent.title}</div><div className="art-meta">{upcomingEvent.location} · {new Intl.DateTimeFormat("en-IN", { timeStyle: "short" }).format(new Date(upcomingEvent.date))}</div><div className="hero-event-hint">Click to view details →</div></> : <><div className="art-date upcoming-empty">—<span>SOON</span></div><div className="art-title">Your next<br />experience.</div><div className="art-meta">New events are on the way</div></>}</div><div className="floating-note">✦ <span>Good things<br />are waiting.</span></div></div>
+        <div className="hero-art"><div className="art-card card-back" /><div className={`art-card card-main${upcomingEvent ? " interactive-card" : ""}`} onClick={() => upcomingEvent && openEvent(upcomingEvent)} onKeyDown={(event) => event.key === "Enter" && upcomingEvent && openEvent(upcomingEvent)} role={upcomingEvent ? "button" : undefined} tabIndex={upcomingEvent ? 0 : undefined}><div className="art-label">{upcomingEvent ? "UPCOMING EVENT" : "NO UPCOMING EVENT"}</div>{upcomingEvent ? <><div className="art-date">{new Date(upcomingEvent.date).getDate()}<span>{new Intl.DateTimeFormat("en-IN", { month: "short" }).format(new Date(upcomingEvent.date)).toUpperCase()}</span></div><div className="art-title">{upcomingEvent.title}</div><div className="art-meta">{upcomingEvent.location} · {new Intl.DateTimeFormat("en-IN", { timeStyle: "short" }).format(new Date(upcomingEvent.date))}</div><div className="hero-event-hint">Click to view details →</div><div className="hero-countdown"><span>Starts in</span><strong>{formatCountdown(upcomingEvent.date, currentTime)}</strong></div></> : <><div className="art-date upcoming-empty">—<span>SOON</span></div><div className="art-title">Your next<br />experience.</div><div className="art-meta">New events are on the way</div></>}</div><div className="floating-note">✦ <span>Good things<br />are waiting.</span></div></div>
       </section>
 
       <section className="discover shell" id="discover">
@@ -316,7 +362,7 @@ function App() {
 
       {isOrganizer && <section className="my-events shell" id={user.role === "admin" ? "admin-review" : undefined}><div className="section-heading"><div><div className="eyebrow">{user.role === "admin" ? "Control center" : "Your organizer space"}</div><h2>{user.role === "admin" ? "Review events." : "Your submissions."}</h2></div><span className="muted">{myEvents.length} event{myEvents.length === 1 ? "" : "s"}</span></div>{myEvents.length === 0 ? <div className="submission-empty">{user.role === "admin" ? "No event submissions need review." : "Your submitted events will appear here with their approval status."}</div> : <div className="submission-grid">{myEvents.map((event) => <article className="submission-card" key={event._id}><div><span className={`status-pill ${event.status}`}>{event.status}</span><h3>{event.title}</h3><p>{formatDate(event.date)} · {event.location}</p>{user.role === "admin" && <p className="submission-organizer">Organizer: {event.organizer?.name || "Unknown"}</p>}</div>{user.role === "admin" ? <div className="moderation-actions">{event.status === "pending" && <><button className="approve-button" onClick={() => moderateEvent(event._id, "approved")}>Approve</button><button className="reject-button" onClick={() => moderateEvent(event._id, "rejected")}>Reject</button></>}<button className="delete-button" onClick={() => deleteEvent(event._id)}>Delete</button></div> : <span className="submission-arrow">↗</span>}</article>)}</div>}</section>}
 
-      {selectedEvent && <div className="modal-backdrop" role="presentation" onClick={() => setSelectedEvent(null)}><section className="event-modal" role="dialog" aria-modal="true" aria-label="Event details" onClick={(clickEvent) => clickEvent.stopPropagation()}><button className="modal-close" onClick={() => setSelectedEvent(null)} aria-label="Close event details">×</button>{selectedEvent.image && <div className="modal-image" style={{ backgroundImage: `url(${selectedEvent.image})` }} />}<div className="modal-body"><div className="modal-kicker"><span className="status-pill approved">{selectedEvent.category}</span><span>{formatPrice(selectedEvent.ticketPrice)}</span></div><h2>{selectedEvent.title}</h2><p className="modal-description">{selectedEvent.description}</p><div className="event-detail-grid"><div><span>WHEN</span><strong>{formatDateTime(selectedEvent.date)}</strong></div><div><span>WHERE</span><strong>{selectedEvent.location}</strong></div><div><span>AVAILABILITY</span><strong>{selectedEvent.availableSeats} seats left</strong></div><div><span>ORGANIZED BY</span><strong>{selectedEvent.organizer?.name || "Event organizer"}</strong></div></div><div className="ticket-booking-panel"><div className="ticket-quantity-row"><div><span className="booking-label">Tickets</span><small>Maximum 10 tickets per booking</small></div><div className="quantity-control"><button type="button" onClick={() => setTicketQuantity((quantity) => Math.max(1, quantity - 1))} disabled={ticketQuantity <= 1}>−</button><strong>{ticketQuantity}</strong><button type="button" onClick={() => setTicketQuantity((quantity) => Math.min(selectedTicketLimit, quantity + 1))} disabled={ticketQuantity >= selectedTicketLimit}>+</button></div></div><div className="booking-pricing"><div><span>Ticket price</span><strong>{formatMoney(Number(selectedEvent.ticketPrice) || 0)} × {ticketQuantity}</strong></div><div><span>Subtotal</span><strong>{formatMoney(selectedSubtotal)}</strong></div><div><span>GST (18%)</span><strong>{formatMoney(selectedGst)}</strong></div><div className="booking-total"><span>Total payable</span><strong>{formatMoney(selectedTotal)}</strong></div></div></div><button className="primary-button modal-reserve" disabled={!user || Number(selectedEvent.availableSeats) < 1} onClick={() => registerForEvent(selectedEvent._id, ticketQuantity)}>{user ? `Book ${ticketQuantity} ticket${ticketQuantity === 1 ? "" : "s"}` : "Sign in to book"} <span>→</span></button></div></section></div>}
+      {selectedEvent && <div className="modal-backdrop" role="presentation" onClick={() => setSelectedEvent(null)}><section className="event-modal" role="dialog" aria-modal="true" aria-label="Event details" onClick={(clickEvent) => clickEvent.stopPropagation()}><button className="modal-close" onClick={() => setSelectedEvent(null)} aria-label="Close event details">×</button>{selectedEvent.image && <div className="modal-image" style={{ backgroundImage: `url(${selectedEvent.image})` }} />}<div className="modal-body"><div className="modal-kicker"><span className="status-pill approved">{selectedEvent.category}</span><span>{formatPrice(selectedEvent.ticketPrice)}</span></div><h2>{selectedEvent.title}</h2><p className="modal-description">{selectedEvent.description}</p><div className="event-detail-grid"><div><span>WHEN</span><strong>{formatDateTime(selectedEvent.date)}</strong></div><div><span>WHERE</span><strong>{selectedEvent.location}</strong></div><div><span>AVAILABILITY</span><strong>{selectedEvent.availableSeats} seats left</strong></div><div><span>ORGANIZED BY</span><strong>{selectedEvent.organizer?.name || "Event organizer"}</strong></div></div><div className="modal-utility-actions"><button className="outline-button" type="button" onClick={() => shareEvent(selectedEvent)}>Share event ↗</button><button className="outline-button" type="button" onClick={() => addToCalendar(selectedEvent)}>Add to calendar +</button></div><div className="ticket-booking-panel"><div className="ticket-quantity-row"><div><span className="booking-label">Tickets</span><small>Maximum 10 tickets per booking</small></div><div className="quantity-control"><button type="button" onClick={() => setTicketQuantity((quantity) => Math.max(1, quantity - 1))} disabled={ticketQuantity <= 1}>−</button><strong>{ticketQuantity}</strong><button type="button" onClick={() => setTicketQuantity((quantity) => Math.min(selectedTicketLimit, quantity + 1))} disabled={ticketQuantity >= selectedTicketLimit}>+</button></div></div><div className="booking-pricing"><div><span>Ticket price</span><strong>{formatMoney(Number(selectedEvent.ticketPrice) || 0)} × {ticketQuantity}</strong></div><div><span>Subtotal</span><strong>{formatMoney(selectedSubtotal)}</strong></div><div><span>GST (18%)</span><strong>{formatMoney(selectedGst)}</strong></div><div className="booking-total"><span>Total payable</span><strong>{formatMoney(selectedTotal)}</strong></div></div></div><button className="primary-button modal-reserve" disabled={!user || Number(selectedEvent.availableSeats) < 1} onClick={() => registerForEvent(selectedEvent._id, ticketQuantity)}>{user ? `Book ${ticketQuantity} ticket${ticketQuantity === 1 ? "" : "s"}` : "Sign in to book"} <span>→</span></button></div></section></div>}
 
       {!user && <section className="auth shell" id="auth"><div className="auth-copy"><div className="eyebrow">Your event journey</div><h2>Be part of<br /><em>something good.</em></h2><p>Sign in to reserve your spot, or create an organizer account to bring your own event to life.</p></div><form className="auth-form" onSubmit={handleAuth}><div className="tabs"><button type="button" className={authMode === "login" ? "active" : ""} onClick={() => setAuthMode("login")}>Sign in</button><button type="button" className={authMode === "register" ? "active" : ""} onClick={() => setAuthMode("register")}>Create account</button></div>{authMode === "register" && <input name="name" value={authForm.name} onChange={updateForm(setAuthForm)} placeholder="Full name" required />}<input type="email" name="email" value={authForm.email} onChange={updateForm(setAuthForm)} placeholder="Email address" required /><input type="password" name="password" value={authForm.password} onChange={updateForm(setAuthForm)} placeholder="Password (6+ characters)" required />{authMode === "register" && <select name="role" value={authForm.role} onChange={updateForm(setAuthForm)}><option value="attendee">I want to attend events</option><option value="organizer">I want to organize events</option></select>}<button className="primary-button" type="submit" disabled={authBusy}>{authBusy ? "Please wait…" : authMode === "login" ? "Sign in" : "Create account"} <span>→</span></button></form></section>}
 
